@@ -11,6 +11,7 @@
 
 import os
 import sys
+import urllib.parse
 
 # 确保可以导入同目录下的 hf_upload_core
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -21,7 +22,7 @@ from flask_cors import CORS
 from hf_upload_core import delete_from_hf, upload_to_hf
 
 app = Flask(__name__)
-CORS(app, resources={r"/upload": {"origins": "*"}, r"/download": {"origins": "*"}, r"/delete": {"origins": "*"}})
+CORS(app, resources={r"/upload": {"origins": "*"}, r"/download": {"origins": "*"}, r"/delete": {"origins": "*"}, r"/list": {"origins": "*"}})
 
 
 @app.route("/upload", methods=["POST", "OPTIONS"])
@@ -115,6 +116,45 @@ def delete():
     try:
         result = delete_from_hf(repo=repo, path=path, token=token)
         return jsonify(result), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/list", methods=["GET", "OPTIONS"])
+def list_files():
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+
+    repo = request.args.get("repo")
+    path = request.args.get("path")
+    recursive = request.args.get("recursive", "true")
+    token = request.args.get("token")
+
+    if not repo:
+        return jsonify({"error": "missing repo"}), 400
+    if not path:
+        return jsonify({"error": "missing path"}), 400
+    if not token:
+        return jsonify({"error": "missing token"}), 400
+
+    try:
+        hf_url = (
+            f"https://huggingface.co/api/datasets/{repo}/tree/main"
+            f"?path={urllib.parse.quote(path)}&recursive={recursive}"
+        )
+        resp = requests.get(
+            hf_url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=(10, 60),
+        )
+
+        if resp.status_code == 404:
+            return jsonify([]), 200
+
+        if not resp.ok:
+            return jsonify({"error": f"HF list failed: {resp.status_code}"}), resp.status_code
+
+        return jsonify(resp.json()), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
